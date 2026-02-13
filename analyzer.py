@@ -6,6 +6,8 @@ TikTok风险分析器 - 多语言模型版本
 import re
 import time
 import os
+import json
+from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any
 
@@ -191,6 +193,8 @@ class ModelAnalyzer:
             "de": {"hassen", "töten", "zerstören", "angreifen"},
             "es": {"odiar", "matar", "destruir", "atacar"},
         }
+
+        self.political_signals = self._load_political_signals()
 
     def analyze_with_models(
         self, text: str, language: str = "auto"
@@ -393,32 +397,112 @@ class ModelAnalyzer:
 
         return min(score, 1.0)
 
-    def _analyze_political_relevance(self, text: str, language: str) -> float:
-        """分析政治相关性"""
-        # 政治关键词（多语言）
-        political_keywords = {
-            "en": {"government", "president", "election", "vote", "policy", "law"},
-            "zh": {"政府", "总统", "选举", "投票", "政策", "法律"},
-            "ja": {"政府", "大統領", "選挙", "投票", "政策", "法律"},
-            "ko": {"정부", "대통령", "선거", "투표", "정책", "법률"},
-            "fr": {"gouvernement", "président", "élection", "vote", "politique", "loi"},
-            "de": {"Regierung", "Präsident", "Wahl", "Stimme", "Politik", "Gesetz"},
-            "es": {"gobierno", "presidente", "elección", "voto", "política", "ley"},
+    def _default_political_signals(self) -> Dict[str, Dict[str, List[str]]]:
+        """默认政治信号词库（用于配置缺失时兜底）"""
+        return {
+            "en": {
+                "keywords": ["government", "president", "election", "vote", "policy", "law", "parliament", "senate"],
+                "hashtags": ["politics", "election", "vote", "policy", "geopolitics", "news"],
+                "actors": ["biden", "trump", "putin", "xi", "zelensky", "modi"],
+                "institutions": ["white house", "congress", "united nations", "eu", "nato"],
+                "issues": ["immigration", "tax", "inflation", "sanctions", "war", "border"],
+            },
+            "zh": {
+                "keywords": ["政府", "总统", "选举", "投票", "政策", "法律", "议会", "外交"],
+                "hashtags": ["政治", "时政", "选举", "投票", "国际关系"],
+                "actors": ["习近平", "拜登", "特朗普", "普京", "泽连斯基"],
+                "institutions": ["国务院", "联合国", "欧盟", "北约", "国会"],
+                "issues": ["关税", "通胀", "制裁", "边境", "战争", "主权"],
+            },
+            "ja": {"keywords": ["政府", "大統領", "選挙", "投票", "政策", "法律"]},
+            "ko": {"keywords": ["정부", "대통령", "선거", "투표", "정책", "법률"]},
+            "fr": {"keywords": ["gouvernement", "président", "élection", "vote", "politique", "loi"]},
+            "de": {"keywords": ["regierung", "präsident", "wahl", "stimme", "politik", "gesetz"]},
+            "es": {"keywords": ["gobierno", "presidente", "elección", "voto", "política", "ley"]},
         }
 
+    def _load_political_signals(self) -> Dict[str, Dict[str, set]]:
+        """加载可配置政治词库；找不到配置则使用内置默认"""
+        default_data = self._default_political_signals()
+        config_path = Path(__file__).resolve().parent / "political_keywords.json"
+
+        data = default_data
+        if config_path.exists():
+            try:
+                loaded = json.loads(config_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict) and loaded:
+                    data = loaded
+            except Exception as e:
+                print(f"[WARN] 读取政治词库配置失败，使用内置默认: {e}")
+
+        normalized: Dict[str, Dict[str, set]] = {}
+        for lang, buckets in data.items():
+            if not isinstance(buckets, dict):
+                continue
+            normalized[lang] = {}
+            for bucket in ["keywords", "hashtags", "actors", "institutions", "issues"]:
+                values = buckets.get(bucket, [])
+                if not isinstance(values, list):
+                    values = []
+                normalized[lang][bucket] = {
+                    str(v).strip().lower() for v in values if str(v).strip()
+                }
+
+        if "en" not in normalized:
+            normalized["en"] = {
+                "keywords": {"government", "president", "election", "vote", "policy", "law"},
+                "hashtags": set(),
+                "actors": set(),
+                "institutions": set(),
+                "issues": set(),
+            }
+        return normalized
+
+    def _count_signal_hits(self, text_lower: str, candidates: set) -> int:
+        """统计词项命中，英文类词项按词边界匹配以减少误报"""
+        hits = 0
+        for token in candidates:
+            if re.fullmatch(r"[a-z0-9][a-z0-9 _-]*", token):
+                if re.search(r"\b" + re.escape(token) + r"\b", text_lower):
+                    hits += 1
+            else:
+                if token in text_lower:
+                    hits += 1
+        return hits
+
+    def _analyze_political_relevance(self, text: str, language: str) -> float:
+        """分析政治相关性"""
         text_lower = text.lower()
-        keywords = political_keywords.get(language, political_keywords["en"])
+        signals = self.political_signals.get(
+            language, self.political_signals.get("en", {})
+        )
 
-        found_keywords = sum(1 for word in keywords if word in text_lower)
+        keyword_hits = self._count_signal_hits(
+            text_lower, signals.get("keywords", set()))
+        issue_hits = self._count_signal_hits(text_lower, signals.get("issues", set()))
+        actor_hits = self._count_signal_hits(text_lower, signals.get("actors", set()))
+        institution_hits = self._count_signal_hits(
+            text_lower, signals.get("institutions", set())
+        )
 
-        if found_keywords == 0:
-            return 0.0
-        elif found_keywords >= 3:
-            return 0.7
-        elif found_keywords >= 2:
-            return 0.5
-        else:
-            return 0.3
+        hashtags = {tag.lower().lstrip("#")
+                    for tag in re.findall(r"#([^\s#]+)", text_lower)}
+        hashtag_hits = len(hashtags & signals.get("hashtags", set()))
+
+        score = 0.0
+        score += min(0.45, keyword_hits * 0.15)
+        score += min(0.24, issue_hits * 0.12)
+        score += min(0.36, actor_hits * 0.18)
+        score += min(0.30, institution_hits * 0.15)
+        score += min(0.20, hashtag_hits * 0.10)
+
+        # 额外上下文信号：例如 "2028 election" / "vote 2024"
+        if re.search(r"\b(19|20)\d{2}\b", text_lower) and re.search(
+            r"\b(election|vote|ballot|campaign)\b", text_lower
+        ):
+            score += 0.12
+
+        return min(score, 1.0)
 
 
 # ============================== 主分析器 ==============================
