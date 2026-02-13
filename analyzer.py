@@ -7,7 +7,7 @@ import re
 import json
 import time
 from datetime import datetime
-from typing import Dict, List, Tuple, Any, Optional
+from typing import Dict, List, Any
 
 
 class ModelManager:
@@ -247,10 +247,12 @@ class ModelAnalyzer:
 
                     results["toxicity"] = toxicity
                 else:
-                    results["toxicity"] = self._estimate_toxicity(text, detected_lang)
+                    results["toxicity"] = self._estimate_toxicity(
+                        text, detected_lang)
             except Exception as e:
                 print(f"毒性检测失败: {e}")
-                results["toxicity"] = self._estimate_toxicity(text, detected_lang)
+                results["toxicity"] = self._estimate_toxicity(
+                    text, detected_lang)
 
             # 3. 使用仇恨言论检测模型
             try:
@@ -380,9 +382,11 @@ class ModelAnalyzer:
                 score += 0.3
 
         # 检查强度词汇
-        intensity_words = {"very", "extremely", "absolutely", "completely", "totally"}
+        intensity_words = {"very", "extremely",
+                           "absolutely", "completely", "totally"}
         text_lower = text.lower()
-        intensity_count = sum(1 for word in intensity_words if word in text_lower)
+        intensity_count = sum(
+            1 for word in intensity_words if word in text_lower)
         score += min(0.3, intensity_count * 0.1)
 
         return min(score, 1.0)
@@ -441,7 +445,8 @@ class TiktokRiskAnalyzer:
         }
 
         # 风险等级阈值
-        self.risk_thresholds = {"LOW": 0.2, "MODERATE": 0.4, "HIGH": 0.7, "SEVERE": 0.9}
+        self.risk_thresholds = {"LOW": 0.2,
+                                "MODERATE": 0.4, "HIGH": 0.7, "SEVERE": 0.9}
 
         print("✅ 分析器初始化完成")
 
@@ -459,7 +464,8 @@ class TiktokRiskAnalyzer:
 
         try:
             # 1. 使用模型分析各个维度
-            dimensions = self.model_analyzer.analyze_with_models(text, language)
+            dimensions = self.model_analyzer.analyze_with_models(
+                text, language)
 
             # 2. 计算综合风险分数
             risk_score = self._calculate_risk_score(dimensions)
@@ -474,7 +480,8 @@ class TiktokRiskAnalyzer:
             confidence = self._calculate_confidence(text, dimensions)
 
             # 6. 检测语言
-            detected_language = self.model_analyzer.language_detector.detect(text)
+            detected_language = self.model_analyzer.language_detector.detect(
+                text)
 
             # 7. 构建结果
             result = {
