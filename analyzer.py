@@ -1,12 +1,16 @@
-"""
+﻿"""
 TikTok风险分析器 - 多语言模型版本
 使用本地预训练模型进行内容风险分析
 """
 
 import re
 import time
+import os
 from datetime import datetime
 from typing import Dict, List, Any
+
+# Force CPU-only execution even when torch is available.
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
 
 
 class ModelManager:
@@ -18,8 +22,7 @@ class ModelManager:
 
     def _init_models(self):
         """初始化所有需要的模型"""
-        print("正在初始化模型...")
-
+        self.models = {}
         try:
             # 1. 情感分析模型 (支持多语言)
             print("加载情感分析模型...")
@@ -32,7 +35,7 @@ class ModelManager:
                 max_length=512,
                 truncation=True,
             )
-            print("✅ 情感分析模型加载成功")
+            print("[OK] 情感分析模型加载成功")
 
             # 2. 毒性检测模型 (英语)
             print("加载毒性检测模型...")
@@ -44,7 +47,7 @@ class ModelManager:
                     max_length=512,
                     truncation=True,
                 )
-                print("✅ 毒性检测模型加载成功")
+                print("[OK] 毒性检测模型加载成功")
             except:
                 # 如果加载失败，使用备用模型
                 self.models["toxicity"] = pipeline(
@@ -52,7 +55,7 @@ class ModelManager:
                     model="distilbert-base-uncased-finetuned-sst-2-english",
                     device=-1,
                 )
-                print("✅ 使用备用情感模型进行毒性检测")
+                print("[OK] 使用备用情感模型进行毒性检测")
 
             # 3. 仇恨言论检测 (多语言)
             print("加载仇恨言论检测模型...")
@@ -64,18 +67,18 @@ class ModelManager:
                     max_length=512,
                     truncation=True,
                 )
-                print("✅ 仇恨言论检测模型加载成功")
+                print("[OK] 仇恨言论检测模型加载成功")
             except:
-                print("⚠️ 仇恨言论模型加载失败，将使用规则检测")
+                print("[WARN] 仇恨言论模型加载失败，将使用规则检测")
                 self.models["hate"] = None
 
-            print("🎉 所有模型初始化完成")
+            print("[INFO] 所有模型初始化完成")
 
         except Exception as e:
-            print(f"⚠️ 模型初始化失败: {e}")
-            print("⚠️ 将使用轻量级模式运行")
+            print(f"[WARN] 模型初始化失败: {e}")
+            print("[WARN] 将使用轻量级模式运行")
             self.models = {}
-            raise e
+            return
 
 
 # ============================== 语言检测 ==============================
@@ -92,7 +95,7 @@ class LanguageDetector:
             self.detect_func = detect
             self.has_langdetect = True
         except ImportError:
-            print("⚠️ langdetect库未安装，使用简单语言检测")
+            print("[WARN] langdetect库未安装，使用简单语言检测")
             self.has_langdetect = False
             self._init_simple_detector()
 
@@ -426,7 +429,7 @@ class TiktokRiskAnalyzer:
 
     def __init__(self):
         print("=" * 60)
-        print("🎬 TikTok多语言风险分析器 - 模型版本")
+        print("[INFO] TikTok多语言风险分析器 - 模型版本")
         print("=" * 60)
 
         # 初始化模型管理器
@@ -447,7 +450,7 @@ class TiktokRiskAnalyzer:
         self.risk_thresholds = {"LOW": 0.2,
                                 "MODERATE": 0.4, "HIGH": 0.7, "SEVERE": 0.9}
 
-        print("✅ 分析器初始化完成")
+        print("[OK] 分析器初始化完成")
 
     def analyze(self, text: str, language: str = "auto") -> Dict[str, Any]:
         """分析文本风险"""
@@ -557,14 +560,13 @@ class TiktokRiskAnalyzer:
 
         # 添加风险等级说明
         if risk_level == "SEVERE":
-            explanations.append("⚠️ 严重风险：内容可能违反平台政策")
+            explanations.append("[WARN] 严重风险：内容可能违反平台政策")
         elif risk_level == "HIGH":
-            explanations.append("⚠️ 高风险：建议人工审核")
+            explanations.append("[WARN] 高风险：建议人工审核")
         elif risk_level == "MODERATE":
-            explanations.append("⚠️ 中等风险：需要关注")
-
+            explanations.append("[WARN] 中等风险：需要关注")
         if not explanations and risk_level == "LOW":
-            explanations.append("✅ 内容较为中性，无明显风险")
+            explanations.append("[OK] 内容较为中性，无明显风险")
 
         return explanations
 
@@ -657,23 +659,23 @@ def check_dependencies():
     """检查依赖库"""
     print("检查依赖库...")
 
-    required_packages = ["transformers", "langdetect"]
+    required_packages = ["transformers", "torch", "langdetect"]
 
     missing_packages = []
 
     for package in required_packages:
         try:
             __import__(package.replace("-", "_"))
-            print(f"✅ {package}")
+            print(f"[OK] {package}")
         except ImportError:
-            print(f"❌ {package} (需要安装)")
+            print(f"[MISSING] {package} (需要安装)")
             missing_packages.append(package)
 
     if missing_packages:
         print(f"\n请安装缺失的包: pip install {' '.join(missing_packages)}")
         return False
 
-    print("\n✅ 所有依赖库已安装")
+    print("\n[OK] 所有依赖库已安装")
     return True
 
 
@@ -702,20 +704,20 @@ def run_start():
         result = analyze_text(test["text"], test["lang"])
 
         if result["success"]:
-            print(f"✅ 成功: {result['success']}")
+            print(f"[OK] 成功: {result['success']}")
             print(f"🌐 检测语言: {result['detected_language']}")
-            print(f"⚠️  风险等级: {result['risk_level']}")
-            print(f"📊 风险分数: {result['risk_score']}")
-            print(f"⏱️  处理时间: {result['processing_time']}秒")
-            print(f"📈 维度分析:")
+            print(f"[WARN]  风险等级: {result['risk_level']}")
+            print(f"[INFO] 风险分数: {result['risk_score']}")
+            print(f"[TIME]  处理时间: {result['processing_time']}秒")
+            print(f"[INFO] 维度分析:")
             for dim, score in result["dimensions"].items():
-                bar = "█" * int(score * 20)
+                bar = "#" * int(score * 20)
                 print(f"   {dim:20s} {score:.3f} {bar}")
             print(f"💬 解释说明:")
             for exp in result["explanations"]:
-                print(f"   • {exp}")
+                print(f"   - {exp}")
         else:
-            print(f"❌ 错误: {result['error']}")
+            print(f"[ERR] 错误: {result['error']}")
 
     print(f"\n{'='*70}")
 
